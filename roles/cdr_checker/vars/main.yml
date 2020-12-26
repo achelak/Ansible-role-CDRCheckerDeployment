@@ -1,0 +1,11 @@
+---
+# vars file for deoloy_cdr_checker
+# vars for docker-compose file
+GF_SECURITY_ADMIN_USER: admin
+GF_SECURITY_ADMIN_PASSWORD: changeme
+GF_USERS_ALLOW_SIGN_UP: false
+POSTGRES_DB: postgres 
+POSTGRES_USER: postgres    
+POSTGRES_PASSWORD: password
+API_USER: admin
+API_PASSWORD: admin

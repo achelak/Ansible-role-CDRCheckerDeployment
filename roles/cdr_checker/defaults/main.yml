@@ -1,0 +1,20 @@
+---
+# defaults file for deoloy_cdr_checker
+project_dir: "{{ ansible_user_dir }}/CDR_Checker"
+source_code_dir: "{{ ansible_user_dir }}/CDR_Checker/CDRChecker_source_files"
+alpine_version: 3.8.2-alpine
+php_version: 7.1-fpm
+prometheus_version: v2.16.0
+alertmanager_version: v0.20.0
+node_exporter_version: v0.18.1
+cadvisor_version: v0.34.0
+grafana_version: 7.3.4
+push_gateway_version: v1.1.0
+nginx_prometheus_exporter_version: 0.4.2
+nginx_version: 1.17
+postgres_version: 9.6
+custom_php_fpm_version: php_fpm
+cdr_api_version: cdr_api_5.6
+
+
+

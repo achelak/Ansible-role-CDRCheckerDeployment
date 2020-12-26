@@ -1,0 +1,294 @@
+---
+  - name: Check project directory exists.
+    stat:
+      path: "{{ project_dir }}"
+    register: project_dir_to_delete
+
+
+  - debug:
+      msg: "Project directory is exists"
+    when: project_dir_to_delete.stat.exists and project_dir_to_delete.stat.isdir
+
+
+  - name: Clean project path
+    become: true
+    file:
+      state: absent
+      path: "{{ project_dir }}/"
+    when: project_dir_to_delete.stat.exists and project_dir_to_delete.stat.isdir
+
+
+  - name: Create project dir
+    file:
+      path: "{{ project_dir }}"
+      state: directory
+  
+  
+  - name: Create work dirs
+    file:
+      path: "{{ item }}"
+      state: directory
+    with_items:
+      - "{{ project_dir }}/alertmanager"
+      - "{{ project_dir }}/caddy"
+      - "{{ project_dir }}/dbpostgres"
+      - "{{ project_dir }}/grafana/provisioning"
+      - "{{ project_dir }}/grafana/provisioning/dashboards"
+      - "{{ project_dir }}/grafana/provisioning/datasources"
+      - "{{ project_dir }}/log"
+      - "{{ project_dir }}/nginxcfg"
+      - "{{ project_dir }}/prometheus"
+      - "{{ project_dir }}/www/html"
+      - "{{ project_dir }}/init"
+
+
+  - name: Copy alertmanager configuration file
+    copy:
+      src: ./alertmanager/alertmanager_config.yml
+      dest: "{{ project_dir }}/alertmanager/config.yml"
+
+
+  - name: Adding nginx configuration file
+    template:
+      src: nginx_default.conf.j2
+      dest: "{{ project_dir }}/nginxcfg/default.conf"
+
+
+  - name: Copy caddy configuration file
+    copy:
+      src: ./caddy/Caddyfile
+      dest: "{{ project_dir }}/caddy/Caddyfile"
+
+
+  # - name: Copy .htpasswd for nginx api location
+  #   copy:
+  #     src: ./nginxcfg/.htpasswd
+  #     dest: "{{ project_dir }}/nginxcfg/.htpasswd"
+
+
+  - name: Create credential for NGINX Basic Auth
+    htpasswd:
+      path: "{{ project_dir }}/nginxcfg/.htpasswd"
+      name: "{{ API_USER }}"
+      password: "{{ API_PASSWORD }}"
+      crypt_scheme: md5_crypt
+
+
+  - name: Copy grafana dashboards configuration file
+    copy:
+      src: ./grafana/dashboards/grafana_dashboard.yml
+      dest: "{{ project_dir }}/grafana/provisioning/dashboards/dashboard.yml"
+  
+
+  - name: Copy grafana datasources configuration file
+    copy:
+      src: ./grafana/datasources/grafana_datasource.yml
+      dest: "{{ project_dir }}/grafana/provisioning/datasources/datasource.yml"
+
+
+  - name: Copy prometheus configuration file
+    copy:
+      src: "./prometheus/{{ item }}"
+      dest: "{{ project_dir }}/prometheus"
+    with_items:
+      - alert.rules
+      - prometheus.yml
+
+
+  - name: Copy grafana dashboards JSON tamplates
+    copy:
+      src: "./grafana/dashboards/{{ item }}"
+      dest: "{{ project_dir }}/grafana/provisioning/dashboards"
+    with_items:
+        - CDR_API.json
+        - docker_containers.json
+        - docker_host.json
+        - monitor_services.json
+        - nginx_container.json
+        - postgresql-database_rev4.json
+
+
+  - name: Clone CDR Viewer web app repo
+    command: git -C {{ project_dir }}/www/html clone https://github.com/achelak/AudiocodesCDRChecker.git
+
+
+  - name: Pulling all project`s images
+    become: true
+    docker_image:
+      name: "{{ item }}"
+      source: pull
+      # force_source: yes
+    with_items:
+      - achelak/cdr_checker:{{ custom_php_fpm_version }}
+      - prom/prometheus:{{ prometheus_version }}
+      - prom/alertmanager:{{ alertmanager_version }}
+      - prom/node-exporter:{{ node_exporter_version }}
+      - gcr.io/google-containers/cadvisor:{{ cadvisor_version }}
+      - grafana/grafana:{{ grafana_version }}
+      - prom/pushgateway:{{ push_gateway_version }}
+      - stefanprodan/caddy
+      - nginx/nginx-prometheus-exporter:{{ nginx_prometheus_exporter_version }}
+      - wrouesnel/postgres_exporter
+      - nginx:{{ nginx_version }}
+      - postgres:{{ postgres_version }}
+
+
+  - name: Pulling docker api image
+    become: true
+    docker_image:
+      name: achelak/cdr_checker:{{cdr_api_version}}
+      source: pull
+      force_source: yes
+
+
+  - name: Copy grafana datasources configuration file
+    copy:
+      src: docker-compose.yml
+      dest: "{{ project_dir }}/docker-compose.yml"
+
+
+  - name: Copy init.sql file
+    copy:
+      src: init.sql
+      dest: "{{ project_dir }}/init/init.sql"
+
+
+  - name: Copy .env template
+    template:
+      src: .env.example.j2
+      dest: "{{ project_dir }}/.env"
+
+
+  - name: Copy initializer.sh template
+    template:
+      src: initializer.sh.j2
+      dest: "{{ project_dir }}/init/initializer.sh"
+      mode: '0711'
+
+
+  - name: Checking for down compose
+    docker_container_info:
+      name: adminer
+    register: down_chck
+
+
+  - name: Running Docker-compose down
+    become: true
+    docker_compose:
+        project_src: "{{ project_dir }}"
+        state: absent
+        pull: no
+    when: down_chck.exists
+  
+
+  - name: Running Docker-compose up
+    become: true
+    docker_compose:
+       project_src: "{{ project_dir }}"
+       state: present
+       pull: no
+
+  - name: Get infos on container`s
+    docker_container_info:
+      name: "{{ item }}"
+    with_items:
+      - adminer
+      - alertmanager
+      - caddy
+      - cadvisor
+      - grafana
+      - nginx
+      - nginx-exporter
+      - nodeexporter
+      - php-fpm
+      - postgres-db
+      - postgres-exporter
+      - prometheus
+      - pushgateway
+      - cdr_api
+    register: result
+
+
+  # - name: Get infos on container
+  #   docker_container_info:
+  #     name: adminer
+  #   register: result
+
+  # - name: Does container exist?
+  #   ansible.builtin.debug:
+  #     msg: "The container {{ result.results[0]['container']['Name'] }} status is {{ result.results[1]['container']['State']['Status'] }}"
+
+  - name: Does container exist?
+    ansible.builtin.debug:
+      msg: "{{ item }}"
+    with_items:
+     - "The container {{ result.results[1]['container']['Name'] }} status is {{ result.results[0]['container']['State']['Status'] }}"
+     - "The container {{ result.results[1]['container']['Name'] }} status is {{ result.results[1]['container']['State']['Status'] }}"
+     - "The container {{ result.results[2]['container']['Name'] }} status is {{ result.results[2]['container']['State']['Status'] }}"
+     - "The container {{ result.results[3]['container']['Name'] }} status is {{ result.results[3]['container']['State']['Status'] }}"
+     - "The container {{ result.results[4]['container']['Name'] }} status is {{ result.results[4]['container']['State']['Status'] }}"
+     - "The container {{ result.results[5]['container']['Name'] }} status is {{ result.results[5]['container']['State']['Status'] }}"
+     - "The container {{ result.results[6]['container']['Name'] }} status is {{ result.results[6]['container']['State']['Status'] }}"
+     - "The container {{ result.results[7]['container']['Name'] }} status is {{ result.results[7]['container']['State']['Status'] }}"
+     - "The container {{ result.results[8]['container']['Name'] }} status is {{ result.results[8]['container']['State']['Status'] }}"
+     - "The container {{ result.results[9]['container']['Name'] }} status is {{ result.results[9]['container']['State']['Status'] }}"
+     - "The container {{ result.results[10]['container']['Name'] }} status is {{ result.results[10]['container']['State']['Status'] }}"
+     - "The container {{ result.results[11]['container']['Name'] }} status is {{ result.results[11]['container']['State']['Status'] }}"
+     - "The container {{ result.results[12]['container']['Name'] }} status is {{ result.results[12]['container']['State']['Status'] }}"
+     - "The container {{ result.results[13]['container']['Name'] }} status is {{ result.results[13]['container']['State']['Status'] }}"
+
+
+  - name: Executing the initializer.sh
+    become: true
+    shell:
+     cmd: ./initializer.sh
+     chdir: "{{ project_dir }}/init/"
+    register: init
+
+
+  - debug:
+      msg: "{{ init.stdout }}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  # - name: Build php-fpm image from CDRChecker
+  #   docker_image:
+  #     build:
+  #       path: "{{ source_code_dir }}/docker/dockerphp"
+  #       pull: yes
+  #     name: achelak/cdr_checker
+  #     tag: php_fpm
+  #     source: build
+  #     state: present
+
+
+  # - name: Build python api image from CDRChecker
+  #   docker_image:
+  #     build:
+  #       path: "{{ source_code_dir }}/docker/dockerpy"
+  #       pull: yes
+  #     name: achelak/cdr_checker
+  #     tag: cdr_api_5.6
+  #     source: build
+  #     state: present
+
+
+
+
+
+
+
+  
